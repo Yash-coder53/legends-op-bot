@@ -1,75 +1,144 @@
 import os
 import sys
 from dotenv import load_dotenv
-from typing import List, Optional
+from typing import List
 
 load_dotenv()
 
 class Config:
-    # ============ BOT CONFIG ============
-    BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
-    BOT_USERNAME: Optional[str] = None
-    BOT_NAME: str = "Rose Ultimate Bot 🌹"
+    # ===== BOT TOKEN (REQUIRED) =====
+    BOT_TOKEN = os.getenv("BOT_TOKEN", "")
     
-    # ============ API CONFIG ============
-    API_ID: int = int(os.getenv("API_ID", 0))
-    API_HASH: str = os.getenv("API_HASH", "")
+    if not BOT_TOKEN:
+        print("❌ ERROR: BOT_TOKEN is required in .env file!")
+        print("Get it from: https://t.me/BotFather")
+        sys.exit(1)
     
-    # ============ OWNER & ADMINS ============
-    OWNER_ID: int = int(os.getenv("OWNER_ID", 0))
-    SUDO_USERS: List[int] = [int(x) for x in os.getenv("SUDO_USERS", "").split(",") if x.isdigit()]
-    DEV_USERS: List[int] = [int(x) for x in os.getenv("DEV_USERS", "").split(",") if x.isdigit()]
+    # ===== BOT INFO =====
+    BOT_NAME = "Legend Ultimate Bot 🌹"
+    BOT_USERNAME = None  # Will be set at runtime
     
-    # ============ DATABASE ============
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///rose_bot.db")
-    MONGO_URI: str = os.getenv("MONGO_URI", "")
-    REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    # ===== OWNER & ADMINS =====
+    OWNER_ID = int(os.getenv("OWNER_ID", "0"))
+    SUDO_USERS = []
+    if os.getenv("SUDO_USERS"):
+        SUDO_USERS = [int(x.strip()) for x in os.getenv("SUDO_USERS").split(",") if x.strip().isdigit()]
     
-    # ============ LOGGING ============
-    LOG_CHANNEL: int = int(os.getenv("LOG_CHANNEL", 0))
-    ERROR_LOG: int = int(os.getenv("ERROR_LOG", 0))
+    # ===== SUPPORT =====
+    SUPPORT_CHAT = os.getenv("SUPPORT_CHAT", "@RoseSupportChat")
+    UPDATE_CHANNEL = os.getenv("UPDATE_CHANNEL", "@RoseUpdateChannel")
     
-    # ============ SUPPORT ============
-    SUPPORT_CHAT: str = os.getenv("SUPPORT_CHAT", "@RoseSupportChat")
-    UPDATE_CHANNEL: str = os.getenv("UPDATE_CHANNEL", "@RoseUpdateChannel")
-    SUPPORT_CHANNEL: str = os.getenv("SUPPORT_CHANNEL", "@RoseSupportChannel")
+    # ===== BOT SETTINGS =====
+    DEL_CMDS = os.getenv("DEL_CMDS", "true").lower() == "true"
+    WORKERS = int(os.getenv("WORKERS", "8"))
     
-    # ============ BOT SETTINGS ============
-    ALLOW_EXCL: bool = True  # Allow ! commands
-    DEL_CMDS: bool = True    # Delete command messages
-    WORKERS: int = int(os.getenv("WORKERS", 8))
-    TIMEZONE: str = os.getenv("TIMEZONE", "UTC")
+    # ===== PATHS =====
+    DATA_DIR = "data"
     
-    # ============ FEDERATION ============
-    FED_IDS: List[str] = [x for x in os.getenv("FED_IDS", "").split(",") if x]
+    # ===== CLEAN MESSAGE TYPES =====
+    CLEAN_TYPES = ["action", "note", "warn", "report", "filter"]
     
-    # ============ CACHE ============
-    CACHE_TIME: int = int(os.getenv("CACHE_TIME", 300))
-    
-    # ============ ANTISPAM ============
-    ANTISPAM_SERVICE: str = os.getenv("ANTISPAM_SERVICE", "cas").lower()
-    
-    @classmethod
-    def validate(cls) -> bool:
-        """Validate essential configuration"""
-        if not cls.BOT_TOKEN:
-            print("❌ ERROR: BOT_TOKEN is required in .env file!")
-            print("Get it from: https://t.me/BotFather")
-            return False
-        
-        if not cls.OWNER_ID:
-            print("⚠️ WARNING: OWNER_ID not set. Some admin features may not work.")
-        
-        return True
-    
-    @classmethod
-    def get_owner_ids(cls) -> List[int]:
-        """Get all owner-level user IDs"""
-        owners = [cls.OWNER_ID]
-        owners.extend(cls.DEV_USERS)
-        owners.extend(cls.SUDO_USERS)
-        return list(set(filter(None, owners)))
+    # ===== LOCK TYPES =====
+    LOCK_TYPES = [
+        "text", "audio", "voice", "video", "photo", "document",
+        "sticker", "gif", "game", "poll", "forward", "location",
+        "contact", "url", "bot", "inline", "all"
+    ]
 
-# Validate config
-if not Config.validate():
-    sys.exit(1)
+class Messages:
+    # Welcome message
+    START_MSG = """
+🌹 *Welcome to Legend Ultimate Bot!*
+
+I'm an advanced group management bot with powerful features:
+• Moderation tools (ban, mute, warn, kick)
+• Welcome/Goodbye messages
+• Filters and notes system
+• Federation support
+• Anti-spam protection
+• And much more!
+
+Use /help to see all commands.
+Support: {support_chat}
+"""
+    
+    HELP_MSG = """
+🌹 *Legend Ultimate Bot - Help Menu*
+
+*Admin Commands:*
+• /ban [user] [reason] - Ban a user
+• /unban [user] - Unban a user
+• /mute [user] [time] - Mute a user
+• /unmute [user] - Unmute a user
+• /warn [user] [reason] - Warn a user
+• /unwarn [user] - Remove warning
+• /kick [user] - Kick a user
+• /del - Delete command message
+
+*Welcome/Goodbye:*
+• /setwelcome [text] - Set welcome message
+• /unsetwelcome - Remove welcome message
+• /setgoodbye [text] - Set goodbye message
+• /unsetgoodbye - Remove goodbye message
+
+*Sudo Management (Owner Only):*
+• /addsudo [user] - Add user to sudo
+• /rmsudo [user] - Remove user from sudo
+• /sudolist - List sudo users
+
+*Global Bans:*
+• /gban [user] [reason] - Global ban
+• /ungban [user] - Remove global ban
+• /gbanlist - List globally banned users
+
+*Federation:*
+• /newfed [name] - Create federation
+• /delfed [fedid] - Delete federation
+• /fedinfo [fedid] - Federation info
+• /fban [user] [reason] - Ban in federation
+• /unfban [user] - Unban in federation
+
+*Locks:*
+• /lock [type] - Lock media type
+• /unlock [type] - Unlock media type
+• /lockall - Lock all types
+• /unlockall - Unlock all types
+• /locktypes - Show lockable types
+
+*Clean Messages:*
+• /cleanmsg [type] - Auto-delete bot messages
+• /keepmsg [type] - Stop auto-deleting
+• /cleanmsgtypes - List deletable types
+
+*Connections:*
+• /connect [chat] - Connect to chat
+• /disconnect - Disconnect from chat
+• /reconnect - Reconnect
+• /connection - Show connection info
+
+*Filters & Notes:*
+• /filter [word] [reply] - Add filter
+• /stop [word] - Remove filter
+• /filters - List filters
+• /save [name] [content] - Save note
+• /get [name] - Get note
+• /clear [name] - Delete note
+• /notes - List notes
+
+*Other Commands:*
+• /start - Start the bot
+• /help - This message
+• /id - Get user/chat ID
+• /report [reason] - Report user
+• /rules - Show chat rules
+• /setrules [text] - Set rules
+• /settings - Chat settings
+
+*Note:* Commands also work with ! prefix
+"""
+    
+    # Error messages
+    NO_PERMISSION = "❌ You don't have permission to use this command!"
+    USER_NOT_FOUND = "❌ User not found! Reply to a user or provide user ID/username."
+    NOT_IN_GROUP = "❌ This command can only be used in groups!"
+    NOT_IN_PRIVATE = "❌ This command can only be used in private chat!"
