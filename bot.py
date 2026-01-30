@@ -1,79 +1,65 @@
 #!/usr/bin/env python3
 """
-🌹 Legends Ultimate Bot - Advanced Group Management Bot
-Combines all features from images and requested commands
+🌹 Legend Ultimate Bot - No Database Version
+Simple, powerful group management bot
 """
 
 import logging
 import sys
+import re
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional
 
 from telegram import Update, BotCommand
 from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
-    CallbackQueryHandler,
     filters,
     ContextTypes,
     ApplicationBuilder
 )
 
 import config
-from database import Session, Users, Chats, init_db
-from utils.helpers import get_user_info, log_action
-from utils.decorators import admin_only, owner_only, sudo_only
-from handlers.admin_handlers import AdminHandlers
-from handlers.user_handlers import UserHandlers
-from handlers.mod_handlers import ModHandlers
-from handlers.fed_handlers import FedHandlers
+from data_manager import data
+from admin_commands import AdminCommands
 
 # Configure logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO,
     handlers=[
-        logging.FileHandler('rose_bot.log'),
+        logging.FileHandler('bot.log', encoding='utf-8'),
         logging.StreamHandler(sys.stdout)
     ]
 )
 logger = logging.getLogger(__name__)
 
-class LegendUltimateBot:
+class LegendBot:
     def __init__(self):
-        """Initialize the bot with all handlers"""
-        logger.info("Initializing Legends Ultimate Bot...")
-        
-        # Initialize database
-        init_db()
+        """Initialize the bot"""
+        logger.info("Initializing Legend Ultimate Bot...")
         
         # Initialize handlers
-        self.admin = AdminHandlers()
-        self.user = UserHandlers()
-        self.mod = ModHandlers()
-        self.fed = FedHandlers()
+        self.admin = AdminCommands()
         
-        # Create application with error handling
+        # Create application
         try:
             self.app = (
                 ApplicationBuilder()
                 .token(config.Config.BOT_TOKEN)
-                .pool_timeout(30)
-                .connect_timeout(30)
-                .read_timeout(30)
-                .write_timeout(30)
+                .concurrent_updates(True)
                 .build()
             )
         except Exception as e:
             logger.error(f"Failed to create application: {e}")
             sys.exit(1)
         
-        # Register all handlers
+        # Register handlers
         self._register_handlers()
         
-        # Set bot commands for BotFather
-        self._setup_bot_commands()
+        # Set bot commands
+        self.commands = self._get_bot_commands()
         
         # Error handler
         self.app.add_error_handler(self.error_handler)
@@ -84,9 +70,9 @@ class LegendUltimateBot:
         """Register all command handlers"""
         
         # ============ BASIC COMMANDS ============
-        self.app.add_handler(CommandHandler("start", self.user.start))
-        self.app.add_handler(CommandHandler("help", self.user.help))
-        self.app.add_handler(CommandHandler("id", self.user.get_id))
+        self.app.add_handler(CommandHandler("start", self.start_command))
+        self.app.add_handler(CommandHandler("help", self.help_command))
+        self.app.add_handler(CommandHandler("id", self.id_command))
         
         # ============ ADMIN COMMANDS ============
         # Sudo management
@@ -97,9 +83,14 @@ class LegendUltimateBot:
         # Global bans
         self.app.add_handler(CommandHandler("gban", self.admin.global_ban))
         self.app.add_handler(CommandHandler("ungban", self.admin.global_unban))
-        self.app.add_handler(CommandHandler("fban", self.fed.fed_ban))
-        self.app.add_handler(CommandHandler("unfban", self.fed.fed_unban))
         self.app.add_handler(CommandHandler("gbanlist", self.admin.gban_list))
+        
+        # Federation
+        self.app.add_handler(CommandHandler("newfed", self.admin.new_federation))
+        self.app.add_handler(CommandHandler("delfed", self.admin.delete_federation))
+        self.app.add_handler(CommandHandler("fedinfo", self.admin.fed_info))
+        self.app.add_handler(CommandHandler("fban", self.admin.fed_ban))
+        self.app.add_handler(CommandHandler("unfban", self.admin.fed_unban))
         
         # Welcome/Goodbye
         self.app.add_handler(CommandHandler("setwelcome", self.admin.set_welcome))
@@ -117,45 +108,29 @@ class LegendUltimateBot:
         self.app.add_handler(CommandHandler("locks", self.admin.show_locks))
         self.app.add_handler(CommandHandler("locktypes", self.admin.lock_types))
         
-        # Clean messages (from images)
+        # Clean messages
         self.app.add_handler(CommandHandler("cleanmsg", self.admin.clean_messages))
         self.app.add_handler(CommandHandler("keepmsg", self.admin.keep_messages))
         self.app.add_handler(CommandHandler("nocleanmsg", self.admin.keep_messages))
         self.app.add_handler(CommandHandler("cleanmsgtypes", self.admin.clean_message_types))
         
-        # Connections (from images)
+        # Connections
         self.app.add_handler(CommandHandler("connect", self.admin.connect_chat))
         self.app.add_handler(CommandHandler("disconnect", self.admin.disconnect_chat))
         self.app.add_handler(CommandHandler("reconnect", self.admin.reconnect_chat))
         self.app.add_handler(CommandHandler("connection", self.admin.connection_info))
-        self.app.add_handler(CommandHandler("connections", self.admin.connections_list))
         
         # ============ MODERATION COMMANDS ============
-        self.app.add_handler(CommandHandler("ban", self.mod.ban_user))
-        self.app.add_handler(CommandHandler("unban", self.mod.unban_user))
-        self.app.add_handler(CommandHandler("mute", self.mod.mute_user))
-        self.app.add_handler(CommandHandler("unmute", self.mod.unmute_user))
-        self.app.add_handler(CommandHandler("kick", self.mod.kick_user))
-        self.app.add_handler(CommandHandler("warn", self.mod.warn_user))
-        self.app.add_handler(CommandHandler("unwarn", self.mod.unwarn_user))
-        self.app.add_handler(CommandHandler("warns", self.mod.show_warns))
-        self.app.add_handler(CommandHandler("del", self.mod.delete_message))
-        self.app.add_handler(CommandHandler("purge", self.mod.purge_messages))
-        
-        # ============ FEDERATION COMMANDS ============
-        self.app.add_handler(CommandHandler("newfed", self.fed.new_federation))
-        self.app.add_handler(CommandHandler("delfed", self.fed.delete_federation))
-        self.app.add_handler(CommandHandler("fedinfo", self.fed.fed_info))
-        self.app.add_handler(CommandHandler("fedadmins", self.fed.fed_admins))
-        self.app.add_handler(CommandHandler("fpromote", self.fed.fed_promote))
-        self.app.add_handler(CommandHandler("fdemote", self.fed.fed_demote))
-        self.app.add_handler(CommandHandler("fedchats", self.fed.fed_chats))
-        
-        # ============ UTILITY COMMANDS ============
-        self.app.add_handler(CommandHandler("rules", self.user.show_rules))
-        self.app.add_handler(CommandHandler("setrules", self.admin.set_rules))
-        self.app.add_handler(CommandHandler("report", self.user.report_user))
-        self.app.add_handler(CommandHandler("settings", self.admin.chat_settings))
+        self.app.add_handler(CommandHandler("ban", self.admin.ban_user))
+        self.app.add_handler(CommandHandler("unban", self.admin.unban_user))
+        self.app.add_handler(CommandHandler("mute", self.admin.mute_user))
+        self.app.add_handler(CommandHandler("unmute", self.admin.unmute_user))
+        self.app.add_handler(CommandHandler("kick", self.admin.kick_user))
+        self.app.add_handler(CommandHandler("warn", self.admin.warn_user))
+        self.app.add_handler(CommandHandler("unwarn", self.admin.unwarn_user))
+        self.app.add_handler(CommandHandler("warns", self.admin.show_warns))
+        self.app.add_handler(CommandHandler("del", self.admin.delete_message))
+        self.app.add_handler(CommandHandler("purge", self.admin.purge_messages))
         
         # ============ FILTERS & NOTES ============
         self.app.add_handler(CommandHandler("filter", self.admin.add_filter))
@@ -163,20 +138,26 @@ class LegendUltimateBot:
         self.app.add_handler(CommandHandler("filters", self.admin.list_filters))
         
         self.app.add_handler(CommandHandler("save", self.admin.save_note))
-        self.app.add_handler(CommandHandler("get", self.user.get_note))
+        self.app.add_handler(CommandHandler("get", self.admin.get_note))
         self.app.add_handler(CommandHandler("clear", self.admin.clear_note))
-        self.app.add_handler(CommandHandler("notes", self.user.list_notes))
+        self.app.add_handler(CommandHandler("notes", self.admin.list_notes))
+        
+        # ============ UTILITY COMMANDS ============
+        self.app.add_handler(CommandHandler("rules", self.admin.show_rules))
+        self.app.add_handler(CommandHandler("setrules", self.admin.set_rules))
+        self.app.add_handler(CommandHandler("report", self.admin.report_user))
+        self.app.add_handler(CommandHandler("settings", self.admin.chat_settings))
         
         # ============ MESSAGE HANDLERS ============
-        # Handle all non-command text messages for filters
+        # Handle filters in messages
         self.app.add_handler(
             MessageHandler(
                 filters.TEXT & ~filters.COMMAND,
-                self.admin.handle_filter
+                self.admin.handle_filter_message
             )
         )
         
-        # Handle new chat members for welcome
+        # Handle new members for welcome
         self.app.add_handler(
             MessageHandler(
                 filters.StatusUpdate.NEW_CHAT_MEMBERS,
@@ -184,7 +165,7 @@ class LegendUltimateBot:
             )
         )
         
-        # Handle left chat members for goodbye
+        # Handle left members for goodbye
         self.app.add_handler(
             MessageHandler(
                 filters.StatusUpdate.LEFT_CHAT_MEMBERS,
@@ -192,102 +173,144 @@ class LegendUltimateBot:
             )
         )
         
-        logger.info(f"Registered {len(self.app.handlers)} handlers")
+        # Alternative command prefix !
+        self.app.add_handler(
+            MessageHandler(
+                filters.Regex(r'^!\w+'),
+                self.handle_exclamation_command
+            )
+        )
     
-    def _setup_bot_commands(self):
-        """Setup bot commands for BotFather menu"""
-        self.commands = [
+    def _get_bot_commands(self):
+        """Get bot commands for BotFather"""
+        return [
             BotCommand("start", "Start the bot"),
-            BotCommand("help", "Get help with commands"),
-            BotCommand("id", "Get user/chat ID"),
-            
-            # Admin commands
-            BotCommand("ban", "Ban a user"),
-            BotCommand("unban", "Unban a user"),
-            BotCommand("mute", "Mute a user"),
-            BotCommand("unmute", "Unmute a user"),
-            BotCommand("warn", "Warn a user"),
-            BotCommand("kick", "Kick a user"),
-            BotCommand("del", "Delete a message"),
-            
-            # Settings
-            BotCommand("setwelcome", "Set welcome message"),
-            BotCommand("setgoodbye", "Set goodbye message"),
-            BotCommand("rules", "Show chat rules"),
-            BotCommand("settings", "Chat settings"),
-            
-            # Filters & Notes
-            BotCommand("filter", "Add a filter"),
-            BotCommand("filters", "List filters"),
-            BotCommand("save", "Save a note"),
-            BotCommand("notes", "List notes"),
-            
-            # Clean messages
-            BotCommand("cleanmsg", "Auto-delete bot messages"),
-            BotCommand("cleanmsgtypes", "List deletable types"),
-            
-            # Connections
-            BotCommand("connect", "Connect to a chat"),
-            BotCommand("connection", "Show connection info"),
-            
-            # Federation
-            BotCommand("newfed", "Create new federation"),
-            BotCommand("fedinfo", "Federation info"),
-            
-            # Report
-            BotCommand("report", "Report a user"),
+            BotCommand("help", "Get help"),
+            BotCommand("id", "Get ID"),
+            BotCommand("ban", "Ban user"),
+            BotCommand("unban", "Unban user"),
+            BotCommand("mute", "Mute user"),
+            BotCommand("unmute", "Unmute user"),
+            BotCommand("warn", "Warn user"),
+            BotCommand("kick", "Kick user"),
+            BotCommand("setwelcome", "Set welcome"),
+            BotCommand("setgoodbye", "Set goodbye"),
+            BotCommand("rules", "Show rules"),
+            BotCommand("report", "Report user"),
+            BotCommand("filter", "Add filter"),
+            BotCommand("save", "Save note"),
+            BotCommand("cleanmsg", "Auto-delete messages"),
+            BotCommand("connect", "Connect to chat"),
         ]
     
-    async def set_bot_commands(self):
-        """Set bot commands in BotFather"""
-        try:
-            await self.app.bot.set_my_commands(self.commands)
-            logger.info("Bot commands set successfully!")
-        except Exception as e:
-            logger.error(f"Failed to set bot commands: {e}")
+    # ============ BASIC COMMAND HANDLERS ============
+    async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /start command"""
+        user = update.effective_user
+        chat = update.effective_chat
+        
+        # Save user data
+        data.update_user(
+            user.id,
+            first_name=user.first_name,
+            last_name=user.last_name or "",
+            username=user.username or ""
+        )
+        
+        welcome_msg = config.Messages.START_MSG.format(
+            support_chat=config.Config.SUPPORT_CHAT
+        )
+        
+        await update.message.reply_text(
+            welcome_msg,
+            parse_mode='Markdown',
+            disable_web_page_preview=True
+        )
     
-    async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle errors in the bot"""
-        logger.error(f"Exception while handling an update: {context.error}")
+    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /help command"""
+        await update.message.reply_text(
+            config.Messages.HELP_MSG,
+            parse_mode='Markdown',
+            disable_web_page_preview=True
+        )
+    
+    async def id_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /id command"""
+        user = update.effective_user
+        chat = update.effective_chat
         
-        # Log error details
-        if update and hasattr(update, 'effective_user'):
-            user_id = update.effective_user.id
-            chat_id = update.effective_chat.id if update.effective_chat else 0
-            logger.error(f"User: {user_id}, Chat: {chat_id}")
+        response = f"""
+👤 *Your ID:* `{user.id}`
+💬 *Chat ID:* `{chat.id}`
+
+"""
         
-        # Send error to log channel if configured
-        if config.Config.LOG_CHANNEL:
-            try:
-                error_msg = (
-                    f"❌ *Bot Error*\n\n"
-                    f"• Error: `{context.error}`\n"
-                    f"• Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-                )
-                
-                if update and hasattr(update, 'effective_user'):
-                    error_msg += f"• User: {update.effective_user.id}\n"
-                
-                await context.bot.send_message(
-                    config.Config.LOG_CHANNEL,
-                    error_msg,
+        if user.username:
+            response += f"📱 *Username:* @{user.username}\n"
+        
+        if chat.type != "private":
+            response += f"📛 *Chat Title:* {chat.title}\n"
+            response += f"👥 *Chat Type:* {chat.type}\n"
+        
+        await update.message.reply_text(response, parse_mode='Markdown')
+    
+    async def handle_exclamation_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle commands with ! prefix"""
+        message = update.message.text
+        command = message.split()[0][1:]  # Remove "!"
+        
+        # Simulate command handling
+        # In practice, you would route this to appropriate handlers
+        await update.message.reply_text(
+            f"Command `!{command}` received.\n"
+            f"I also support `/` prefix for commands.",
+            parse_mode='Markdown'
+        )
+    
+    async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE):
+        """Handle errors"""
+        logger.error(f"Exception: {context.error}", exc_info=context.error)
+        
+        # Try to send error to user
+        try:
+            if update and hasattr(update, 'message') and update.message:
+                await update.message.reply_text(
+                    f"❌ An error occurred:\n`{context.error}`",
                     parse_mode='Markdown'
                 )
-            except Exception as e:
-                logger.error(f"Failed to send error to log channel: {e}")
+        except:
+            pass
     
     async def post_init(self, application: Application):
-        """Run after bot is initialized"""
-        await self.set_bot_commands()
-        
-        # Set bot username in config
-        me = await application.bot.get_me()
-        config.Config.BOT_USERNAME = me.username
-        
-        logger.info(f"Bot started as @{me.username}")
-        logger.info(f"Owner ID: {config.Config.OWNER_ID}")
-        logger.info(f"Sudo users: {len(config.Config.SUDO_USERS)}")
-        logger.info("🌹 Legend Ultimate Bot is ready!")
+        """Run after bot initialization"""
+        try:
+            # Set bot commands
+            await application.bot.set_my_commands(self.commands)
+            
+            # Get bot info
+            me = await application.bot.get_me()
+            config.Config.BOT_USERNAME = me.username
+            
+            logger.info(f"Bot started as @{me.username}")
+            logger.info(f"Owner: {config.Config.OWNER_ID}")
+            logger.info(f"Sudo users: {len(config.Config.SUDO_USERS)}")
+            
+            # Load additional sudo users from data
+            data_sudo_users = data.get_all_sudo_users()
+            if data_sudo_users:
+                logger.info(f"Data sudo users: {len(data_sudo_users)}")
+            
+            print("\n" + "="*50)
+            print("🌹 LEGEND BOT STARTED SUCCESSFULLY!")
+            print("="*50)
+            print(f"Bot: @{me.username}")
+            print(f"Owner: {config.Config.OWNER_ID}")
+            print(f"Support: {config.Config.SUPPORT_CHAT}")
+            print("="*50 + "\n")
+            
+        except Exception as e:
+            logger.error(f"Post-init error: {e}")
     
     def run(self):
         """Start the bot"""
@@ -306,22 +329,23 @@ class LegendUltimateBot:
             
         except KeyboardInterrupt:
             logger.info("Bot stopped by user")
+            data.cleanup()  # Save all data
         except Exception as e:
             logger.error(f"Fatal error: {e}")
+            data.cleanup()  # Save all data before exit
             sys.exit(1)
 
 def main():
     """Main entry point"""
     print("\n" + "="*50)
-    print("🌹 LEGEND ULTIMATE BOT - Advanced Group Management")
+    print("🌹 LEGEND ULTIMATE BOT - No Database Version")
     print("="*50)
-    print(f"Version: 3.0.0")
+    print(f"Version: 2.0.0")
     print(f"Python: {sys.version}")
-    print(f"Owner ID: {config.Config.OWNER_ID}")
     print("="*50 + "\n")
     
     # Create and run bot
-    bot = LegendUltimateBot()
+    bot = LegendBot()
     bot.run()
 
 if __name__ == "__main__":
